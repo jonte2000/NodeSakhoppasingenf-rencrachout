@@ -1,0 +1,1574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NODEGRID V3.0</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@500;600;700&display=swap" rel="stylesheet">
+<script>
+// Firebase loads async — game ALWAYS starts regardless
+window.fbReady=false; window.fbWrite=async()=>false; window.fbListen=(cb)=>cb([]);
+(async()=>{
+  try{
+    const {initializeApp}=await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js");
+    const {getDatabase,ref,set,onValue,query,orderByChild,limitToLast}=await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js");
+    const db=getDatabase(initializeApp({apiKey:"AIzaSyBgi5vZth7ZFZB__wZHRUbs9T5EWF5ITDY",authDomain:"nodesgame.firebaseapp.com",databaseURL:"https://nodesgame-default-rtdb.europe-west1.firebasedatabase.app",projectId:"nodesgame",storageBucket:"nodesgame.firebasestorage.app",messagingSenderId:"289794653201",appId:"1:289794653201:web:c10e684f978abf689485b0"}));
+    function pid(){let id=localStorage.getItem('ng_pid');if(!id){id='p'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);localStorage.setItem('ng_pid',id);}return id;}
+    window.fbWrite=async(name,score)=>{try{await set(ref(db,'lb/'+pid()),{name,score,t:Date.now()});return true;}catch(e){console.error('fbWrite',e.message);return false;}};
+    window.fbListen=(cb)=>{const q=query(ref(db,'lb'),orderByChild('score'),limitToLast(200));onValue(q,snap=>{const r=[];snap.forEach(c=>r.push({pid:c.key,...c.val()}));r.sort((a,b)=>b.score-a.score);cb(r);});};
+    window.fbReady=true; console.log('Firebase OK');
+  }catch(e){console.warn('Firebase offline:',e.message);}
+})();
+</script>
+<style>
+:root {
+  --bg:#07080b; --bg2:#0f1117; --bg3:#161922; --border:#222634; --border2:#343a4e;
+  --text:#d2d6e2; --text2:#7e869e; --text3:#484f67;
+  --accent:#00d4ff; --green:#00e676; --amber:#ffab00; --red:#ff4444; --purple:#b388ff; --pink:#ff6eb4;
+  --font-mono:'Share Tech Mono',monospace; --font-sans:'Barlow',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:var(--font-sans);overflow:hidden;height:100vh;width:100vw;user-select:none;}
+#app{display:grid;grid-template-rows:62px 1fr 62px;height:100vh;position:relative;}
+#topbar{background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;z-index:20;padding:0 16px;gap:0;overflow:hidden;}
+.logo{font-family:var(--font-sans);font-size:17px;font-weight:700;letter-spacing:2px;color:var(--accent);border-right:1px solid var(--border);padding-right:18px;margin-right:0;white-space:nowrap;}
+.hstat{padding:0 14px;border-right:1px solid var(--border);height:100%;display:flex;flex-direction:column;justify-content:center;min-width:0;}
+.hstat .lbl{font-size:10px;color:var(--text3);font-family:var(--font-mono);text-transform:uppercase;white-space:nowrap;}
+.hstat .val{font-size:15px;font-weight:600;font-family:var(--font-mono);white-space:nowrap;}
+#canvas-wrap{position:relative;overflow:hidden;background:var(--bg);width:100%;height:100%;cursor:grab;}
+#canvas-wrap.panning{cursor:grabbing;}
+#grid-cv{position:absolute;inset:0;pointer-events:none;z-index:0;}
+#wire-svg{position:absolute;inset:0;pointer-events:none;overflow:visible;z-index:1;}
+#node-layer{position:absolute;inset:0;z-index:2;}
+
+/* NODE */
+.gnode{position:absolute;background:var(--bg2);border:1px solid var(--border2);border-radius:7px;cursor:grab;box-shadow:0 4px 12px rgba(0,0,0,0.5);z-index:2;min-width:175px;}
+.gnode.selected{border-color:var(--accent)!important;box-shadow:0 0 0 2px rgba(0,212,255,0.25),0 0 16px rgba(0,212,255,0.15);z-index:6;}
+.gnode.active-chain{border-color:var(--green);box-shadow:0 0 8px rgba(0,230,118,0.25);}
+.gnhdr{padding:8px 12px;display:flex;align-items:center;gap:7px;border-bottom:1px solid var(--border);}
+.gnicon{font-size:15px;line-height:1;}
+.gntitle{font-size:12px;font-weight:700;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-transform:uppercase;}
+.gndel{font-size:11px;color:var(--text3);cursor:pointer;padding:2px;flex-shrink:0;}
+.gndel:hover{color:var(--red);}
+.gnbody{padding:8px 10px 10px;}
+.gnbar{height:3px;background:var(--bg3);border-radius:2px;margin-bottom:6px;overflow:hidden;}
+.gnbarfill{height:100%;border-radius:2px;width:0%;transition:width 0.05s linear;}
+.gninfo{font-family:var(--font-mono);font-size:11px;color:var(--text2);display:flex;justify-content:space-between;gap:6px;}
+.gninfo span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.gninfo span:last-child{flex-shrink:0;}
+
+/* PORTS */
+.port{position:absolute;width:14px;height:14px;border-radius:50%;border:2px solid var(--border2);background:var(--bg);cursor:crosshair;z-index:4;transition:transform 0.1s;}
+.port:hover,.port.lit{transform:scale(1.3);border-color:var(--accent);}
+.port.out{right:-7px;}
+.port.in{left:-7px;}
+.port-label{position:absolute;font-size:10px;font-family:var(--font-mono);color:var(--text3);pointer-events:none;white-space:nowrap;top:50%;transform:translateY(-50%);}
+.port.out .port-label{right:14px;}
+.port.in .port-label{left:14px;}
+
+/* PACKET */
+.packet{position:absolute;width:8px;height:8px;border-radius:50%;pointer-events:none;z-index:10;transform:translate(-50%,-50%);filter:blur(0.5px);}
+
+/* BOTTOM */
+#bottombar{background:var(--bg2);border-top:1px solid var(--border);display:flex;align-items:center;justify-content:center;gap:10px;z-index:30;padding:0 14px;}
+.panel-btn{padding:10px 22px;background:var(--bg3);border:1px solid var(--border2);border-radius:5px;color:var(--text2);font-weight:600;font-size:13px;cursor:pointer;text-transform:uppercase;letter-spacing:0.5px;transition:0.15s;white-space:nowrap;}
+.panel-btn:hover{color:var(--text);border-color:var(--text3);}
+.panel-btn.active{color:var(--accent);border-color:var(--accent);background:#111a24;}
+.panel-btn.prestige-btn{color:var(--purple);border-color:var(--purple);}
+.panel-btn.prestige-btn:hover{background:#1a1030;}
+
+/* PANEL */
+.slide-panel{position:absolute;bottom:62px;left:0;width:100%;height:220px;background:rgba(15,17,23,0.97);border-top:1px solid var(--border);z-index:25;display:none;overflow-x:auto;padding:15px;white-space:nowrap;backdrop-filter:blur(8px);box-shadow:0 -5px 20px rgba(0,0,0,0.6);}
+.panel-items-wrap{display:flex;gap:12px;align-items:flex-start;}
+.box-item{display:inline-flex;flex-direction:column;width:260px;min-height:178px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:12px;white-space:normal;vertical-align:top;justify-content:space-between;transition:0.15s;flex-shrink:0;}
+.box-item:hover:not(.disabled){border-color:var(--border2);background:#1c212d;}
+.box-item.disabled{opacity:0.3;cursor:not-allowed;}
+.biname{font-size:14px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:6px;}
+.bidesc{font-size:13px;color:var(--text2);line-height:1.5;margin-top:6px;flex:1;}
+.biops{display:flex;justify-content:space-between;align-items:center;margin-top:8px;}
+.bicost{font-family:var(--font-mono);font-size:13px;color:var(--amber);font-weight:600;}
+.bicount{font-family:var(--font-mono);font-size:12px;color:var(--accent);background:#0c1a24;padding:2px 6px;border-radius:3px;}
+.action-btn{padding:7px 14px;background:#1c212d;border:1px solid var(--border2);border-radius:4px;color:var(--text);font-size:13px;font-weight:600;cursor:pointer;text-transform:uppercase;white-space:nowrap;}
+.action-btn:hover:not(:disabled){border-color:var(--accent);background:#222b3d;}
+.action-btn:disabled{opacity:0.4;cursor:not-allowed;}
+
+/* NOTIF */
+#notif{position:fixed;bottom:70px;left:50%;transform:translateX(-50%);z-index:100;pointer-events:none;display:flex;flex-direction:column;gap:4px;align-items:center;}
+.nmsg{background:var(--bg2);border:1px solid var(--border2);padding:6px 14px;border-radius:4px;font-size:11px;font-family:var(--font-mono);color:var(--text);animation:nin 0.2s ease,nout 0.2s ease 1.8s forwards;white-space:nowrap;}
+@keyframes nin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes nout{to{opacity:0;transform:translateY(-6px)}}
+
+/* PRESTIGE MODAL */
+#prestige-modal{position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:200;display:none;align-items:center;justify-content:center;}
+#prestige-modal.open{display:flex;}
+.prestige-box{background:var(--bg2);border:1px solid var(--purple);border-radius:8px;padding:30px;max-width:400px;width:90%;text-align:center;}
+.prestige-box h2{color:var(--purple);font-size:20px;letter-spacing:2px;margin-bottom:12px;}
+.prestige-box p{color:var(--text2);font-size:12px;line-height:1.6;margin-bottom:20px;}
+.prestige-box .pval{font-family:var(--font-mono);font-size:22px;color:var(--amber);margin-bottom:20px;}
+.pbtns{display:flex;gap:10px;justify-content:center;}
+.pbtn{padding:10px 24px;border-radius:4px;font-weight:700;font-size:12px;cursor:pointer;text-transform:uppercase;letter-spacing:1px;border:1px solid;}
+.pbtn.confirm{background:#1a1030;color:var(--purple);border-color:var(--purple);}
+.pbtn.confirm:hover{background:#2a1a50;}
+.pbtn.cancel{background:var(--bg3);color:var(--text2);border-color:var(--border2);}
+.pbtn.cancel:hover{background:#1c212d;}
+
+/* ZOOM HUD */
+#zoom-hud{position:absolute;bottom:8px;right:10px;font-family:var(--font-mono);font-size:12px;color:var(--text3);z-index:15;pointer-events:none;}
+
+/* SHOP TABS */
+.shop-tab{padding:10px 18px;font-size:12px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent;color:var(--text3);background:none;border-top:none;border-left:none;border-right:none;letter-spacing:0.5px;white-space:nowrap;text-transform:uppercase;transition:0.15s;}
+.shop-tab:hover{color:var(--text2);}
+.shop-tab.on{color:var(--accent);border-bottom-color:var(--accent);}
+
+/* CHAIN RECIPE BADGE */
+.recipe-row{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;}
+.rbadge{font-size:10px;font-family:var(--font-mono);padding:2px 7px;border-radius:3px;font-weight:600;}
+
+/* ACHIEVEMENT TOAST */
+#ach-notif{position:fixed;top:72px;right:16px;z-index:300;display:flex;flex-direction:column;gap:6px;}
+.ach-card{background:var(--bg2);border:1px solid var(--amber);border-radius:8px;padding:10px 14px;width:260px;animation:achIn 0.3s ease,achOut 0.3s ease 3.7s forwards;}
+.ach-card .ach-top{font-size:10px;color:var(--amber);font-family:var(--font-mono);letter-spacing:1px;}
+.ach-card .ach-name{font-size:14px;font-weight:700;color:var(--text);margin-top:2px;}
+@keyframes achIn{from{opacity:0;transform:translateX(30px)}to{opacity:1;transform:translateX(0)}}
+@keyframes achOut{to{opacity:0;transform:translateX(30px)}}
+
+/* NODE LEVEL BADGE */
+.nlvl{position:absolute;top:5px;right:28px;font-size:9px;font-family:var(--font-mono);color:var(--amber);font-weight:700;}
+
+/* TIER BADGE */
+.tier-badge{font-size:8px;font-family:var(--font-mono);padding:1px 5px;border-radius:3px;font-weight:700;letter-spacing:0.5px;}
+
+/* TUTORIAL */
+#tut-backdrop{position:fixed;inset:0;z-index:200;pointer-events:none;}
+.tut-hole{position:fixed;border-radius:8px;z-index:201;pointer-events:none;transition:left 0.3s ease,top 0.3s ease,width 0.3s ease,height 0.3s ease;outline:3px solid rgba(0,212,255,0.6);outline-offset:3px;box-shadow:0 0 0 9999px rgba(0,0,0,0.55);}
+.tut-hole.pulse{animation:hpulse 1.6s ease-in-out infinite;}
+@keyframes hpulse{0%,100%{outline-color:rgba(0,212,255,0.4);}50%{outline-color:rgba(0,212,255,0.9);}}
+
+/* Tooltip — always bottom-left, above bottombar */
+#tut-tooltip{
+  position:fixed;
+  left:16px;
+  bottom:80px;
+  z-index:300;
+  width:340px;
+  background:var(--bg2);
+  border-radius:12px;
+  box-shadow:0 8px 32px rgba(0,0,0,0.7),0 0 0 1px rgba(255,255,255,0.06);
+  display:none;
+  overflow:hidden;
+  font-family:var(--font-sans);
+}
+#tut-tooltip.active{display:block;animation:tutslide 0.25s ease;}
+@keyframes tutslide{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+
+/* Coloured top accent bar */
+#tut-accent-bar{height:4px;width:100%;transition:background 0.3s;}
+
+#tut-inner{padding:18px 20px 16px;}
+#tut-head{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+#tut-icon{font-size:22px;line-height:1;flex-shrink:0;}
+#tut-titlewrap{}
+#tut-tt-step{font-family:var(--font-mono);font-size:9px;color:var(--text3);letter-spacing:2px;text-transform:uppercase;margin-bottom:2px;}
+#tut-tt-title{font-size:15px;font-weight:700;color:var(--text);line-height:1.25;}
+#tut-tt-body{font-size:13px;color:var(--text2);line-height:1.65;margin-bottom:14px;}
+#tut-tt-body strong{color:var(--text);}
+#tut-tt-body .hl{color:var(--accent);}
+#tut-tt-body .hlg{color:var(--green);}
+#tut-tt-body .hla{color:var(--amber);}
+#tut-tt-body code{font-family:var(--font-mono);background:var(--bg3);padding:1px 7px;border-radius:3px;font-size:11px;color:var(--accent);}
+
+/* Progress bar */
+#tut-progbar-wrap{height:3px;background:var(--bg3);border-radius:2px;margin-bottom:14px;overflow:hidden;}
+#tut-progbar-fill{height:100%;border-radius:2px;transition:width 0.35s ease,background 0.3s;}
+
+/* Footer */
+#tut-tt-foot{display:flex;justify-content:space-between;align-items:center;}
+#tut-skip{background:none;border:none;color:var(--text3);font-size:11px;cursor:pointer;font-family:var(--font-mono);padding:4px 0;letter-spacing:0.5px;}
+#tut-skip:hover{color:var(--text2);}
+#tut-action{padding:9px 20px;border-radius:6px;font-weight:700;font-size:12px;cursor:pointer;text-transform:uppercase;letter-spacing:0.5px;border:none;transition:0.15s;}
+#tut-action:hover{filter:brightness(1.15);}
+
+/* ── LEADERBOARD SCREEN ─────────────────────────────────────────── */
+#lb-screen{
+  display:none; position:fixed; inset:0; z-index:150;
+  background:var(--bg);
+  flex-direction:column;
+  font-family:var(--font-sans);
+}
+#lb-screen.open{display:flex;}
+
+#lb-topbar{
+  background:var(--bg2); border-bottom:1px solid var(--border);
+  height:62px; display:flex; align-items:center; padding:0 20px; gap:16px; flex-shrink:0;
+}
+#lb-topbar .logo{font-size:17px;font-weight:700;letter-spacing:2px;color:var(--amber);}
+#lb-topbar .lbsub{font-size:12px;color:var(--text3);font-family:var(--font-mono);}
+#lb-back{margin-left:auto;padding:9px 20px;background:var(--bg3);border:1px solid var(--border2);border-radius:5px;color:var(--text2);font-size:13px;font-weight:600;cursor:pointer;text-transform:uppercase;}
+#lb-back:hover{color:var(--text);border-color:var(--text3);}
+
+#lb-body{flex:1;overflow-y:auto;padding:28px 24px 24px;display:flex;flex-direction:column;gap:28px;}
+
+/* submit row */
+#lb-submit-row{display:flex;align-items:center;gap:10px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px 18px;}
+#lb-submit-row .lbl{font-size:12px;color:var(--text3);font-family:var(--font-mono);white-space:nowrap;}
+#lb-name-input{flex:1;background:var(--bg3);border:1px solid var(--border2);border-radius:5px;padding:9px 12px;color:var(--text);font-size:14px;font-family:var(--font-sans);outline:none;}
+#lb-name-input:focus{border-color:var(--amber);}
+#lb-score-display{font-family:var(--font-mono);font-size:14px;color:var(--amber);white-space:nowrap;}
+#lb-submit-btn{padding:9px 20px;background:#1a1400;border:1px solid var(--amber);border-radius:5px;color:var(--amber);font-size:13px;font-weight:700;cursor:pointer;text-transform:uppercase;white-space:nowrap;}
+#lb-submit-btn:hover{background:#2a2000;}
+#lb-submit-btn:disabled{opacity:0.4;cursor:not-allowed;}
+
+/* podium */
+#lb-podium{display:flex;align-items:flex-end;justify-content:center;gap:16px;padding:0 10px;}
+.pod{display:flex;flex-direction:column;align-items:center;gap:6px;}
+.pod-crown{font-size:28px;line-height:1;}
+.pod-avatar{width:64px;height:64px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;font-family:var(--font-mono);flex-shrink:0;}
+.pod-name{font-size:13px;font-weight:700;color:var(--text);text-align:center;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.pod-score{font-family:var(--font-mono);font-size:12px;color:var(--text2);}
+.pod-block{border-radius:8px 8px 0 0;width:110px;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:800;color:rgba(0,0,0,0.35);font-family:var(--font-mono);}
+.pod-1 .pod-avatar{background:linear-gradient(135deg,#ffd700,#ffab00);color:#000;box-shadow:0 0 20px rgba(255,215,0,0.4);}
+.pod-1 .pod-block{background:linear-gradient(180deg,#ffd70033,#ffab0022);border:1px solid #ffd70055;height:130px;}
+.pod-2 .pod-avatar{background:linear-gradient(135deg,#c0c0c0,#9ca3af);color:#000;}
+.pod-2 .pod-block{background:linear-gradient(180deg,#c0c0c022,#9ca3af11);border:1px solid #c0c0c044;height:100px;}
+.pod-3 .pod-avatar{background:linear-gradient(135deg,#cd7f32,#a0522d);color:#fff;}
+.pod-3 .pod-block{background:linear-gradient(180deg,#cd7f3222,#a0522d11);border:1px solid #cd7f3244;height:80px;}
+
+/* rest of leaderboard */
+#lb-list{display:flex;flex-direction:column;gap:6px;}
+.lb-row{display:flex;align-items:center;gap:14px;background:var(--bg2);border:1px solid var(--border);border-radius:7px;padding:11px 16px;transition:0.15s;}
+.lb-row.me{border-color:var(--amber);background:#1a1400;}
+.lb-row:hover{background:var(--bg3);}
+.lb-rank{font-family:var(--font-mono);font-size:13px;color:var(--text3);width:28px;flex-shrink:0;text-align:right;}
+.lb-name{font-size:14px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lb-score{font-family:var(--font-mono);font-size:13px;color:var(--amber);flex-shrink:0;}
+.lb-empty{text-align:center;color:var(--text3);font-size:13px;padding:30px;font-family:var(--font-mono);}
+#lb-status{font-size:11px;color:var(--text3);font-family:var(--font-mono);text-align:center;padding:8px 0;}
+
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <div class="logo">NODEGRID v3</div>
+    <div class="hstat"><div class="lbl">Balance</div><div class="val" id="hc" style="color:var(--green)">$0.00</div></div>
+    <div class="hstat"><div class="lbl">Revenue/s</div><div class="val" id="hr" style="color:var(--accent)">$0.00/s</div></div>
+    <div class="hstat"><div class="lbl">Chains</div><div class="val" id="hch">0</div></div>
+    <div class="hstat"><div class="lbl">Prestige</div><div class="val" id="hpr" style="color:var(--purple)">×1.00</div></div>
+    <div class="hstat"><div class="lbl">Total Earned</div><div class="val" id="htot" style="color:var(--amber)">$0.00</div></div>
+    <div class="hstat"><div class="lbl">Nodes</div><div class="val" id="hslots" style="color:var(--text2)">0/16</div></div>
+  </div>
+  <div id="canvas-wrap">
+    <canvas id="grid-cv"></canvas>
+    <svg id="wire-svg"></svg>
+    <div id="node-layer"></div>
+    <div id="zoom-hud">100%</div>
+  </div>
+  <div id="bottombar">
+    <button class="panel-btn" id="btn-inventory" onclick="togglePanel('inventory')">📦 Inventory</button>
+    <button class="panel-btn" id="btn-shop" onclick="togglePanel('shop')">🛒 Shop</button>
+    <button class="panel-btn" id="btn-upgrades" onclick="togglePanel('upgrades')">⚡ Upgrades</button>
+    <button class="panel-btn prestige-btn" onclick="openPrestige()">★ Prestige</button>
+    <button class="panel-btn" onclick="openTutorial()" style="color:var(--text3);border-color:var(--border2);">? Help</button>
+    <button class="panel-btn" onclick="openLB()" style="color:var(--amber);border-color:var(--amber)88;">🏆 Leaderboard</button>
+  </div>
+  <div class="slide-panel" id="panel-inventory"><div class="panel-items-wrap" id="inventory-list"></div></div>
+  <div class="slide-panel" id="panel-shop" style="padding:0;">
+    <div id="shop-tabs" style="display:flex;gap:0;border-bottom:1px solid var(--border);background:var(--bg2);flex-shrink:0;"></div>
+    <div style="overflow-x:auto;padding:12px 15px 12px;height:calc(100% - 42px);"><div class="panel-items-wrap" id="shop-list"></div></div>
+  </div>
+  <div class="slide-panel" id="panel-upgrades"><div class="panel-items-wrap" id="upgrades-list"></div></div>
+</div>
+<div id="notif"></div>
+
+<!-- LEADERBOARD FULLSCREEN -->
+<div id="lb-screen">
+  <div id="lb-topbar">
+    <div class="logo">🏆 LEADERBOARD</div>
+    <div class="lbsub" id="lb-subtitle">—</div>
+    <button id="lb-back" onclick="closeLB()">← Back</button>
+  </div>
+  <div id="lb-body">
+    <div id="lb-submit-row">
+      <span class="lbl">YOUR SCORE</span>
+      <span id="lb-my-score" style="font-family:var(--font-mono);font-size:15px;color:var(--amber);font-weight:700;"></span>
+      <div id="lb-name-area" style="display:flex;align-items:center;gap:10px;margin-left:auto;flex-wrap:wrap;"></div>
+    </div>
+    <div id="lb-status"></div>
+    <div id="lb-podium"></div>
+    <div id="lb-all-label" style="font-family:var(--font-mono);font-size:10px;color:var(--text3);letter-spacing:2px;text-transform:uppercase;padding:4px;display:none;">All Players</div>
+    <div id="lb-list"></div>
+  </div>
+</div>
+
+<div id="tut-backdrop"></div>
+<div class="tut-hole" id="tut-hole" style="display:none"></div>
+<div id="tut-tooltip">
+  <div id="tut-accent-bar"></div>
+  <div id="tut-inner">
+    <div id="tut-head">
+      <div id="tut-icon">📋</div>
+      <div id="tut-titlewrap">
+        <div id="tut-tt-step">STEP 1 / 11</div>
+        <div id="tut-tt-title">Welcome</div>
+      </div>
+    </div>
+    <div id="tut-progbar-wrap"><div id="tut-progbar-fill"></div></div>
+    <div id="tut-tt-body"></div>
+    <div id="tut-tt-foot">
+      <button id="tut-skip" onclick="closeTutorial()">skip tutorial</button>
+      <button id="tut-action" onclick="tutAction()">Next →</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── NODE DEFINITIONS ───────────────────────────────────────────────
+// Upgrades: each is a tiered stack of 5 levels, each purchasable in sequence
+// effect: 'rate'|'speed'|'mult'|'multx'
+function makeUpgrades(baseName, baseDesc, baseCost, effect, val, levels=5){
+  return Array.from({length:levels},(_,i)=>({
+    name:`${baseName} ${['I','II','III','IV','V','VI','VII','VIII','IX','X'][i]}`,
+    desc:`${baseDesc} (×${(Math.pow(val,i+1)).toFixed(2)})`,
+    cost:Math.round(baseCost*Math.pow(2.2,i)),
+    effect, val
+  }));
+}
+
+const NDEFS = {
+  network: {
+    label:'Network', icon:'🌐', color:'#378add',
+    desc:'Core hub. Outputs DL + UL signals to downstream nodes.',
+    cost:100,
+    ports:{ out:[{id:'dl',label:'DL',type:'dl',multi:true},{id:'ul',label:'UL',type:'ul',multi:true}], in:[] },
+    cycleMs:2000, baseRate:6,
+    upgrades:[
+      ...makeUpgrades('Bandwidth','Rate multiplier',80,'rate',1.4),
+      ...makeUpgrades('Turbo Cycle','Cycle speed',180,'speed',1.3),
+    ]
+  },
+  videodl: {
+    label:'Video DL', icon:'🎞', color:'#7f77dd',
+    desc:'Decodes raw video chunks. DL in → File out to Seller or Encoder.',
+    cost:150,
+    ports:{ out:[{id:'file',label:'File',type:'file',multi:true}], in:[{id:'dl',label:'DL',accepts:'dl'}] },
+    cycleMs:3000, baseRate:18,
+    upgrades:[
+      ...makeUpgrades('Resolution','Rate multiplier',120,'rate',1.5),
+      ...makeUpgrades('Batch Decode','Cycle speed',250,'speed',1.35),
+    ]
+  },
+  audiodl: {
+    label:'Audio DL', icon:'🎵', color:'#e86b6b',
+    desc:'Streams audio data. DL in → Audio out to Seller or Encoder.',
+    cost:180,
+    ports:{ out:[{id:'audio',label:'Audio',type:'audio',multi:true}], in:[{id:'dl',label:'DL',accepts:'dl'}] },
+    cycleMs:2500, baseRate:22,
+    upgrades:[
+      ...makeUpgrades('Bitrate','Rate multiplier',140,'rate',1.45),
+      ...makeUpgrades('Fast Buffer','Cycle speed',280,'speed',1.35),
+    ]
+  },
+  encoder: {
+    label:'Encoder', icon:'🔧', color:'#3dd68c',
+    desc:'Compresses File or Audio streams into high-value Encoded data.',
+    cost:300,
+    ports:{ out:[{id:'enc',label:'Enc',type:'enc',multi:true}], in:[{id:'file',label:'File',accepts:'file',multi:true},{id:'audio',label:'Audio',accepts:'audio',multi:true}] },
+    cycleMs:3500, baseRate:35,
+    upgrades:[
+      ...makeUpgrades('Codec Boost','Rate multiplier',220,'rate',1.5),
+      ...makeUpgrades('Pipeline Opt','Cycle speed',400,'speed',1.3),
+    ]
+  },
+  proxy: {
+    label:'Proxy', icon:'🔀', color:'#ffab00',
+    desc:'Relays and boosts a DL signal. Place between Network and nodes.',
+    cost:250,
+    ports:{ out:[{id:'dl',label:'DL',type:'dl',multi:true}], in:[{id:'dl',label:'DL',accepts:'dl'}] },
+    cycleMs:1500, baseRate:10,
+    upgrades:[
+      ...makeUpgrades('Onion Route','Rate multiplier',200,'rate',1.6),
+      ...makeUpgrades('Zero-Latency','Cycle speed',350,'speed',1.4),
+    ]
+  },
+  seller: {
+    label:'Seller', icon:'💰', color:'#d4537e',
+    desc:'Converts File/Audio/Enc + UL into money. The core cash node.',
+    cost:200,
+    ports:{ out:[{id:'money',label:'$',type:'money'}], in:[{id:'file',label:'File',accepts:'file',multi:true},{id:'audio',label:'Audio',accepts:'audio',multi:true},{id:'enc',label:'Enc',accepts:'enc',multi:true},{id:'ul',label:'UL',accepts:'ul'}] },
+    cycleMs:4000, baseRate:45,
+    upgrades:[
+      ...makeUpgrades('Dark Market','Rate multiplier',180,'rate',1.45),
+      ...makeUpgrades('Bulk Orders','Cycle speed',320,'speed',1.3),
+    ]
+  },
+  collector: {
+    label:'Collector', icon:'🏦', color:'#00e676',
+    desc:'Banks profits. Each upgrade multiplies ALL connected Seller yields.',
+    cost:250,
+    ports:{ out:[], in:[{id:'money',label:'$',accepts:'money',multi:true}] },
+    cycleMs:1200, baseRate:1.0,
+    upgrades:[
+      ...makeUpgrades('Vault Tier','Yield multiplier',300,'mult',1.4,5),
+      {name:'Compound Engine',desc:'Yield ×2 when 3+ Sellers connected',cost:1200,effect:'multx',val:2.0},
+      {name:'Mega Fund',desc:'Yield ×3 when 5+ Sellers connected',cost:5000,effect:'multx5',val:3.0},
+    ]
+  },
+
+
+  amplifier: {
+    label:'Amplifier', icon:'📶', color:'#0ea5e9',
+    desc:'Boosts any DL signal strength. Chain multiple for huge rate gains.',
+    cost:200,
+    ports:{ out:[{id:'dl',label:'DL',type:'dl',multi:true}], in:[{id:'dl',label:'DL',accepts:'dl'}] },
+    cycleMs:1200, baseRate:12,
+    upgrades:[
+      ...makeUpgrades('Signal Gain','Rate multiplier',150,'rate',1.5),
+      ...makeUpgrades('Clock Speed','Cycle speed',250,'speed',1.4),
+    ]
+  },
+  repeater: {
+    label:'Repeater', icon:'🔁', color:'#67e8f9',
+    desc:'Fans out one DL signal to 4 outputs. Great for parallel chains.',
+    cost:350,
+    ports:{ out:[{id:'dl',label:'DL',type:'dl',multi:true},{id:'dl2',label:'DL',type:'dl',multi:true},{id:'dl3',label:'DL',type:'dl',multi:true}], in:[{id:'dl',label:'DL',accepts:'dl'}] },
+    cycleMs:1800, baseRate:9,
+    upgrades:[
+      ...makeUpgrades('Throughput','Rate multiplier',200,'rate',1.45),
+      ...makeUpgrades('Parallel Clk','Cycle speed',320,'speed',1.35),
+    ]
+  },
+  cdnnode: {
+    label:'CDN Node', icon:'🌍', color:'#818cf8',
+    desc:'Caches and distributes File streams faster. Supercharges Streamer chains.',
+    cost:420,
+    ports:{ out:[{id:'file',label:'File',type:'file',multi:true}], in:[{id:'file',label:'File',accepts:'file',multi:true}] },
+    cycleMs:2000, baseRate:40,
+    upgrades:[
+      ...makeUpgrades('Edge Cache','Rate multiplier',300,'rate',1.5),
+      ...makeUpgrades('Anycast','Cycle speed',500,'speed',1.4),
+    ]
+  },
+  gamefarm: {
+    label:'Game Farm', icon:'🎮', color:'#d946ef',
+    desc:'Runs many game instances in parallel. Outputs massive Game stream.',
+    cost:600,
+    ports:{ out:[{id:'game',label:'Game',type:'game',multi:true}], in:[{id:'dl',label:'DL',accepts:'dl',multi:true},{id:'power',label:'PWR',accepts:'power'}] },
+    cycleMs:4000, baseRate:110,
+    upgrades:[
+      ...makeUpgrades('More Instances','Rate multiplier',450,'rate',1.5),
+      ...makeUpgrades('Render Farm','Cycle speed',700,'speed',1.35),
+    ]
+  },
+  tournament: {
+    label:'Tournament', icon:'🏆', color:'#f59e0b',
+    desc:'Hosts esports tournaments. Converts Game + Stream into premium money.',
+    cost:900,
+    ports:{ out:[{id:'money',label:'$',type:'money'}], in:[{id:'game',label:'Game',accepts:'game',multi:true},{id:'stream',label:'Stream',accepts:'stream',multi:true},{id:'ul',label:'UL',accepts:'ul'}] },
+    cycleMs:6000, baseRate:200,
+    upgrades:[
+      ...makeUpgrades('Prize Pool','Rate multiplier',700,'rate',1.5),
+      ...makeUpgrades('Live Broadcast','Cycle speed',1000,'speed',1.3),
+    ]
+  },
+  cloudnode: {
+    label:'Cloud Node', icon:'☁️', color:'#7dd3fc',
+    desc:'Processes Data in the cloud. Takes Data in, outputs higher-value Data.',
+    cost:700,
+    ports:{ out:[{id:'data',label:'Data',type:'data',multi:true}], in:[{id:'data',label:'Data',accepts:'data',multi:true},{id:'power',label:'PWR',accepts:'power'}] },
+    cycleMs:3500, baseRate:95,
+    upgrades:[
+      ...makeUpgrades('Cloud Burst','Rate multiplier',550,'rate',1.5),
+      ...makeUpgrades('Auto-Scale','Cycle speed',800,'speed',1.35),
+    ]
+  },
+  ailab: {
+    label:'AI Lab', icon:'🤖', color:'#a3e635',
+    desc:'Trains models on Data. Outputs ultra-high-value AI data stream.',
+    cost:1200,
+    ports:{ out:[{id:'ai',label:'AI',type:'ai',multi:true}], in:[{id:'data',label:'Data',accepts:'data',multi:true},{id:'power',label:'PWR',accepts:'power'}] },
+    cycleMs:5500, baseRate:180,
+    upgrades:[
+      ...makeUpgrades('Neural Boost','Rate multiplier',900,'rate',1.55),
+      ...makeUpgrades('GPU Cluster','Cycle speed',1300,'speed',1.35),
+    ]
+  },
+  exchange: {
+    label:'Exchange', icon:'📈', color:'#34d399',
+    desc:'Trades AI data for maximum profit. Top-tier money generator.',
+    cost:1500,
+    ports:{ out:[{id:'money',label:'$',type:'money'}], in:[{id:'ai',label:'AI',accepts:'ai',multi:true},{id:'ul',label:'UL',accepts:'ul'}] },
+    cycleMs:6500, baseRate:350,
+    upgrades:[
+      ...makeUpgrades('Algo Trade','Rate multiplier',1100,'rate',1.55),
+      ...makeUpgrades('HFT Engine','Cycle speed',1600,'speed',1.35),
+    ]
+  },
+
+  // ── GAMING / SERVER NODES ─────────────────────────────────────────
+
+  pc: {
+    label:'Gaming PC', icon:'🖥', color:'#a855f7',
+    desc:'Runs game clients. Outputs Game Data to Game Broker or Encoder.',
+    cost:400,
+    ports:{ out:[{id:'game',label:'Game',type:'game',multi:true}], in:[{id:'dl',label:'DL',accepts:'dl'},{id:'power',label:'PWR',accepts:'power'}] },
+    cycleMs:3500, baseRate:55,
+    upgrades:[
+      ...makeUpgrades('GPU Upgrade','Rate multiplier',300,'rate',1.5),
+      ...makeUpgrades('Overclock','Cycle speed',500,'speed',1.35),
+    ]
+  },
+  gamebroker: {
+    label:'Game Broker', icon:'🕹', color:'#c084fc',
+    desc:'Resells Game Data streams. Needs UL feed. Outputs money.',
+    cost:350,
+    ports:{ out:[{id:'money',label:'$',type:'money'}], in:[{id:'game',label:'Game',accepts:'game',multi:true},{id:'ul',label:'UL',accepts:'ul'}] },
+    cycleMs:4200, baseRate:70,
+    upgrades:[
+      ...makeUpgrades('Black Market','Rate multiplier',250,'rate',1.45),
+      ...makeUpgrades('Batch Sale','Cycle speed',450,'speed',1.3),
+    ]
+  },
+  powerplant: {
+    label:'Power Plant', icon:'⚡', color:'#facc15',
+    desc:'Generates Power for PCs and Servers. No input needed.',
+    cost:300,
+    ports:{ out:[{id:'power',label:'PWR',type:'power',multi:true}], in:[] },
+    cycleMs:1800, baseRate:8,
+    upgrades:[
+      ...makeUpgrades('Reactor Core','Rate multiplier',200,'rate',1.4),
+      ...makeUpgrades('Turbine Opt','Cycle speed',350,'speed',1.35),
+    ]
+  },
+  server: {
+    label:'Server', icon:'🗄', color:'#38bdf8',
+    desc:'Heavy-duty data processor. Takes any File/Audio/Game and outputs packed Data.',
+    cost:500,
+    ports:{ out:[{id:'data',label:'Data',type:'data',multi:true}], in:[{id:'file',label:'File',accepts:'file',multi:true},{id:'audio',label:'Audio',accepts:'audio',multi:true},{id:'game',label:'Game',accepts:'game',multi:true},{id:'power',label:'PWR',accepts:'power'}] },
+    cycleMs:4500, baseRate:80,
+    upgrades:[
+      ...makeUpgrades('RAID Array','Rate multiplier',400,'rate',1.5),
+      ...makeUpgrades('Fast I/O','Cycle speed',600,'speed',1.35),
+    ]
+  },
+  datacenter: {
+    label:'Data Center', icon:'🏭', color:'#0ea5e9',
+    desc:'Top-tier node. Sells packed Data for massive profit. Needs UL.',
+    cost:800,
+    ports:{ out:[{id:'money',label:'$',type:'money'}], in:[{id:'data',label:'Data',accepts:'data',multi:true},{id:'ul',label:'UL',accepts:'ul'}] },
+    cycleMs:5000, baseRate:130,
+    upgrades:[
+      ...makeUpgrades('Hyperscale','Rate multiplier',600,'rate',1.55),
+      ...makeUpgrades('Load Balance','Cycle speed',900,'speed',1.35),
+    ]
+  },
+  streamer: {
+    label:'Streamer', icon:'📡', color:'#f472b6',
+    desc:'Broadcasts live. Converts Video + Audio into Stream data.',
+    cost:450,
+    ports:{ out:[{id:'stream',label:'Stream',type:'stream',multi:true}], in:[{id:'file',label:'File',accepts:'file',multi:true},{id:'audio',label:'Audio',accepts:'audio',multi:true}] },
+    cycleMs:3200, baseRate:60,
+    upgrades:[
+      ...makeUpgrades('CDN Boost','Rate multiplier',350,'rate',1.45),
+      ...makeUpgrades('Low Latency','Cycle speed',500,'speed',1.3),
+    ]
+  },
+  adplatform: {
+    label:'Ad Platform', icon:'📢', color:'#fb923c',
+    desc:'Monetizes Stream data with ads. Outputs money. Needs UL.',
+    cost:600,
+    ports:{ out:[{id:'money',label:'$',type:'money'}], in:[{id:'stream',label:'Stream',accepts:'stream',multi:true},{id:'ul',label:'UL',accepts:'ul'}] },
+    cycleMs:4800, baseRate:90,
+    upgrades:[
+      ...makeUpgrades('Targeted Ads','Rate multiplier',450,'rate',1.5),
+      ...makeUpgrades('Auto Bidder','Cycle speed',700,'speed',1.3),
+    ]
+  },
+};
+
+// ─── STATE ───────────────────────────────────────────────────────────
+
+// ─── STATE ───────────────────────────────────────────────────────────
+const G = {
+  cash:0, totalEarned:0, prestigeMult:1,
+  nodes:[], conns:[], nid:0, cid:0,
+  selected:null, wiring:null, dragging:null, dragOff:{x:0,y:0},
+  view:{x:60,y:60,scale:1},
+  panning:false, panStart:{x:0,y:0}, panOrigin:{x:0,y:0},
+  lastTick:Date.now(), wireMap:new Map(),
+  activePanel:null,
+  inventory:{ network:1, videodl:1, audiodl:0, encoder:0, proxy:0, amplifier:0, repeater:0, seller:1, collector:1, pc:0, gamebroker:0, gamefarm:0, tournament:0, powerplant:0, server:0, datacenter:0, cloudnode:0, ailab:0, exchange:0, streamer:0, cdnnode:0, adplatform:0 }
+};
+
+// ─── NODE LIMIT ──────────────────────────────────────────────────────
+const MAX_NODES = 16; // max nodes on canvas at once
+
+// ─── UTILS ───────────────────────────────────────────────────────────
+function snap(v){return Math.round(v/20)*20;}
+function fmt(v){return v>=1e9?'$'+(v/1e9).toFixed(2)+'B':v>=1e6?'$'+(v/1e6).toFixed(2)+'M':v>=1e3?'$'+(v/1e3).toFixed(1)+'K':'$'+v.toFixed(2);}
+function w2s(wx,wy){return{x:wx*G.view.scale+G.view.x,y:wy*G.view.scale+G.view.y};}
+function s2w(sx,sy){return{x:(sx-G.view.x)/G.view.scale,y:(sy-G.view.y)/G.view.scale};}
+function notify(msg,col=''){const c=document.getElementById('notif');const d=document.createElement('div');d.className='nmsg';if(col)d.style.color=col;d.textContent=msg;c.appendChild(d);setTimeout(()=>d.remove(),2200);}
+
+// ─── ZOOM & PAN ───────────────────────────────────────────────────────
+const cWrap=document.getElementById('canvas-wrap');
+cWrap.addEventListener('wheel',e=>{
+  e.preventDefault();
+  const rect=cWrap.getBoundingClientRect();
+  const mx=e.clientX-rect.left, my=e.clientY-rect.top;
+  const delta=e.deltaY>0?0.9:1.1;
+  const newScale=Math.max(0.25,Math.min(3,G.view.scale*delta));
+  G.view.x=mx-(mx-G.view.x)*(newScale/G.view.scale);
+  G.view.y=my-(my-G.view.y)*(newScale/G.view.scale);
+  G.view.scale=newScale;
+  document.getElementById('zoom-hud').textContent=Math.round(G.view.scale*100)+'%';
+  repositionNodes(); drawGrid(); drawWires();
+},{passive:false});
+
+cWrap.addEventListener('mousedown',e=>{
+  // Pan: middle mouse, Alt+left, OR left-click directly on the canvas background
+  const onBackground = e.target === cWrap || e.target.id === 'grid-cv' || e.target.id === 'wire-svg' || e.target.id === 'node-layer';
+  if(e.button===1||(e.button===0&&e.altKey)||(e.button===0&&onBackground&&!G.wiring)){
+    e.preventDefault();
+    G.panning=true; G.panStart={x:e.clientX,y:e.clientY}; G.panOrigin={x:G.view.x,y:G.view.y};
+    cWrap.classList.add('panning');
+  }
+});
+
+window.addEventListener('mousemove',e=>{
+  if(G.panning){
+    G.view.x=G.panOrigin.x+(e.clientX-G.panStart.x);
+    G.view.y=G.panOrigin.y+(e.clientY-G.panStart.y);
+    repositionNodes(); drawGrid(); drawWires(); return;
+  }
+  if(G.dragging){
+    const rect=cWrap.getBoundingClientRect();
+    const lx=e.clientX-rect.left-G.dragOff.x, ly=e.clientY-rect.top-G.dragOff.y;
+    const wp=s2w(lx,ly);
+    G.dragging.n.x=snap(wp.x); G.dragging.n.y=snap(wp.y);
+    const sp=w2s(G.dragging.n.x,G.dragging.n.y);
+    G.dragging.el.style.left=sp.x+'px'; G.dragging.el.style.top=sp.y+'px';
+    traceChain();
+  }
+  if(G.wiring){const rect=cWrap.getBoundingClientRect();drawWires({x:e.clientX-rect.left,y:e.clientY-rect.top});}
+});
+
+window.addEventListener('mouseup',e=>{
+  if(G.panning){G.panning=false;cWrap.classList.remove('panning');}
+  G.dragging=null;
+  if(G.wiring){G.wiring=null;document.querySelectorAll('.port.lit').forEach(p=>p.classList.remove('lit'));drawWires();}
+});
+
+window.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){G.wiring=null;document.querySelectorAll('.port.lit').forEach(p=>p.classList.remove('lit'));drawWires();}
+  if((e.key==='='||e.key==='+')&&e.ctrlKey){e.preventDefault();zoomCenter(1.15);}
+  if(e.key==='-'&&e.ctrlKey){e.preventDefault();zoomCenter(0.87);}
+  if(e.key==='0'&&e.ctrlKey){e.preventDefault();G.view={x:60,y:60,scale:1};repositionNodes();drawGrid();drawWires();document.getElementById('zoom-hud').textContent='100%';}
+});
+
+function zoomCenter(f){
+  const w=cWrap.clientWidth/2, h=cWrap.clientHeight/2;
+  const ns=Math.max(0.25,Math.min(3,G.view.scale*f));
+  G.view.x=w-(w-G.view.x)*(ns/G.view.scale);
+  G.view.y=h-(h-G.view.y)*(ns/G.view.scale);
+  G.view.scale=ns;
+  document.getElementById('zoom-hud').textContent=Math.round(G.view.scale*100)+'%';
+  repositionNodes(); drawGrid(); drawWires();
+}
+
+function repositionNodes(){
+  G.nodes.forEach(n=>{
+    const el=document.getElementById('gn'+n.id); if(!el)return;
+    const sp=w2s(n.x,n.y);
+    el.style.left=sp.x+'px'; el.style.top=sp.y+'px';
+    el.style.transform=`scale(${G.view.scale})`;
+    el.style.transformOrigin='top left';
+  });
+}
+
+window.addEventListener('resize',()=>{drawGrid();traceChain();});
+
+// ─── GRID ─────────────────────────────────────────────────────────────
+function drawGrid(){
+  const cv=document.getElementById('grid-cv'),wrap=document.getElementById('canvas-wrap');
+  cv.width=wrap.clientWidth; cv.height=wrap.clientHeight;
+  const ctx=cv.getContext('2d'); ctx.clearRect(0,0,cv.width,cv.height);
+  const gs=40*G.view.scale, ox=((G.view.x%gs)+gs)%gs, oy=((G.view.y%gs)+gs)%gs;
+  ctx.fillStyle='#141822';
+  for(let x=ox;x<cv.width;x+=gs)for(let y=oy;y<cv.height;y+=gs)ctx.fillRect(x-1,y-1,2,2);
+}
+
+// ─── PORT POSITIONS ───────────────────────────────────────────────────
+function portPos(nid,portId,side){
+  const p=document.getElementById(`p_${nid}_${side}_${portId}`); if(!p)return null;
+  const bpr=cWrap.getBoundingClientRect(), pr=p.getBoundingClientRect();
+  return{x:pr.left-bpr.left+pr.width/2, y:pr.top-bpr.top+pr.height/2};
+}
+
+// ─── WIRE COLORS ─────────────────────────────────────────────────────
+const WIRE_COLORS={dl:'#378add',ul:'#d85a30',file:'#00a852',audio:'#e86b6b',enc:'#3dd68c',money:'#ffab00',game:'#a855f7',power:'#facc15',data:'#38bdf8',stream:'#f472b6',ai:'#a3e635'};
+
+function drawWires(mousePos=null){
+  const svg=document.getElementById('wire-svg'); svg.innerHTML='';
+  G.conns.forEach(c=>{
+    const a=portPos(c.from,c.fromPort,'out'),b=portPos(c.to,c.toPort,'in'); if(!a||!b)return;
+    const baseColor=WIRE_COLORS[c.dataType]||'#343a4e';
+    const active=G.nodes.find(n=>n.id===c.from)?._inChain;
+    const info=G.wireMap.get(c.id), congested=info&&info.congested;
+    const path=document.createElementNS('http://www.w3.org/2000/svg','path');
+    const mx=(a.x+b.x)/2;
+    path.setAttribute('d',`M${a.x},${a.y} C${mx},${a.y} ${mx},${b.y} ${b.x},${b.y}`);
+    path.setAttribute('stroke',congested?'var(--red)':active?baseColor:'var(--border)');
+    path.setAttribute('stroke-width',active?'2.5':'1.5');
+    path.setAttribute('fill','none');
+    if(!active&&!congested)path.setAttribute('stroke-dasharray','4 4');
+    svg.appendChild(path);
+  });
+  if(G.wiring&&mousePos){
+    const a=portPos(G.wiring.fromId,G.wiring.fromPort,'out'); if(a){
+      const path=document.createElementNS('http://www.w3.org/2000/svg','path');
+      const mx=(a.x+mousePos.x)/2;
+      path.setAttribute('d',`M${a.x},${a.y} C${mx},${a.y} ${mx},${mousePos.y} ${mousePos.x},${mousePos.y}`);
+      path.setAttribute('stroke',WIRE_COLORS[G.wiring.dataType]||'var(--accent)');
+      path.setAttribute('stroke-width','2'); path.setAttribute('fill','none');
+      svg.appendChild(path);
+    }
+  }
+}
+
+// ─── CHAIN TRACE ─────────────────────────────────────────────────────
+function traceUpstream(nid,portId,visited){
+  if(visited.includes(nid))return null; visited.push(nid);
+  const conn=G.conns.find(c=>c.to===nid&&c.toPort===portId); if(!conn)return null;
+  return G.nodes.find(x=>x.id===conn.from)||null;
+}
+function traceAllUpstream(nid,portId){
+  return G.conns.filter(c=>c.to===nid&&c.toPort===portId).map(c=>G.nodes.find(x=>x.id===c.from)).filter(Boolean);
+}
+
+function effectiveRate(n){
+  let r=NDEFS[n.type].baseRate;
+  n.upgrades.forEach((done,i)=>{if(done&&NDEFS[n.type].upgrades[i].effect==='rate')r*=NDEFS[n.type].upgrades[i].val;});
+  return r*G.prestigeMult;
+}
+function effectiveSpeed(n){
+  let s=1;
+  n.upgrades.forEach((done,i)=>{if(done&&NDEFS[n.type].upgrades[i].effect==='speed')s*=NDEFS[n.type].upgrades[i].val;});
+  return s;
+}
+function effectiveMult(n,sellerCount){
+  let m=1.0;
+  n.upgrades.forEach((done,i)=>{
+    if(!done)return;
+    const up=NDEFS[n.type].upgrades[i];
+    if(up.effect==='mult')m*=up.val;
+    if(up.effect==='multx'&&sellerCount>=3)m*=up.val;
+    if(up.effect==='multx5'&&sellerCount>=5)m*=up.val;
+  });
+  return m;
+}
+
+function traceChain(){
+  G.nodes.forEach(n=>{n._inChain=false;n._chainVal=0;n._hasCongestion=false;n._outCount=0;});
+  G.conns.forEach(c=>{const fn=G.nodes.find(x=>x.id===c.from);if(fn)fn._outCount++;});
+  G.conns.forEach(c=>{
+    const fn=G.nodes.find(x=>x.id===c.from),tn=G.nodes.find(x=>x.id===c.to);
+    if(fn&&tn){
+      const congested=Math.hypot(fn.x-tn.x,fn.y-tn.y)<125;
+      G.wireMap.set(c.id,{congested});
+      if(congested){fn._hasCongestion=true;tn._hasCongestion=true;}
+    }
+  });
+
+  // DATA TYPES each generator node accepts (besides UL)
+  const MONEY_GEN_INPUTS = {
+    seller:    ['file','audio','enc'],
+    gamebroker:['game'],
+    datacenter:['data'],
+    adplatform:['stream'],
+    tournament: ['game','stream'],
+    exchange:   ['ai'],
+  };
+  // Nodes that can feed data types (type → accepted dl-like input)
+  const DL_FED = new Set(['videodl','audiodl','pc','streamer','gamefarm']);
+  const PROC_NODES = new Set(['encoder','server','cloudnode','ailab','cdnnode']);
+
+  function resolveDataNode(ds, allNodes){
+    // Returns true if ds has a valid power/dl source, pushes discovered nodes into allNodes
+    if(DL_FED.has(ds.type)){
+      const net=traceUpstream(ds.id,'dl',[]);
+      if(!net||(net.type!=='network'&&net.type!=='proxy'))return false;
+      allNodes.push(ds,net);
+      // PC also needs power
+      if(ds.type==='pc'){
+        const pwr=traceUpstream(ds.id,'power',[]);
+        if(!pwr||pwr.type!=='powerplant')return false;
+        allNodes.push(pwr);
+      }
+      return true;
+    }
+    if(PROC_NODES.has(ds.type)){
+      // Server/Encoder: gather all its inputs
+      const allInputPorts=Object.keys(NDEFS[ds.type].ports.in.reduce((m,p)=>(m[p.id]=1,m),{})).filter(p=>p!=='power');
+      let inputs=[];
+      allInputPorts.forEach(p=>inputs.push(...traceAllUpstream(ds.id,p)));
+      if(!inputs.length)return false;
+      // Server also needs power
+      if(ds.type==='server'){
+        const pwr=traceUpstream(ds.id,'power',[]);
+        if(!pwr||pwr.type!=='powerplant')return false;
+        allNodes.push(pwr);
+      }
+      for(const inp of inputs){
+        if(!resolveDataNode(inp,allNodes))return false;
+      }
+      allNodes.push(ds);
+      return true;
+    }
+    return false;
+  }
+
+  let count=0;
+  G.nodes.filter(n=>n.type==='collector').forEach(col=>{
+    const moneyFeeders=G.conns.filter(c=>c.to===col.id&&c.toPort==='money')
+      .map(c=>G.nodes.find(n=>n.id===c.from)).filter(n=>n&&MONEY_GEN_INPUTS[n.type]);
+    const mult=effectiveMult(col,moneyFeeders.length);
+
+    G.conns.filter(c=>c.to===col.id&&c.toPort==='money').forEach(ic=>{
+      const feeder=G.nodes.find(n=>n.id===ic.from); if(!feeder)return;
+      const acceptedPorts=MONEY_GEN_INPUTS[feeder.type]; if(!acceptedPorts)return;
+
+      const ulPath=traceUpstream(feeder.id,'ul',[]);
+      if(!ulPath||ulPath.type!=='network')return;
+
+      // Gather all data inputs
+      let dataStreams=[];
+      acceptedPorts.forEach(p=>dataStreams.push(...traceAllUpstream(feeder.id,p)));
+      if(!dataStreams.length)return;
+
+      let allValid=true, allNodes=[feeder,ulPath,col];
+      for(const ds of dataStreams){
+        if(!resolveDataNode(ds,allNodes)){allValid=false;break;}
+      }
+      if(!allValid)return;
+
+      let val=effectiveRate(feeder)+dataStreams.reduce((s,d)=>s+effectiveRate(d),0);
+      allNodes.filter(n=>n.type==='network'||n.type==='proxy'||n.type==='powerplant').forEach(n=>{val+=effectiveRate(n);});
+      // Dedup allNodes
+      const seen=new Set(); allNodes=allNodes.filter(n=>{if(seen.has(n.id))return false;seen.add(n.id);return true;});
+      allNodes.forEach(n=>{n._inChain=true;});
+      const anyCongested=allNodes.some(n=>n._hasCongestion);
+      let finalYield=val*mult; if(anyCongested)finalYield*=0.15;
+      feeder._chainVal=finalYield; col._chainVal+=finalYield; count++;
+    });
+  });
+
+  document.getElementById('hch').textContent=count;
+  checkAchievements();
+  const slotEl=document.getElementById('hslots'); if(slotEl){slotEl.textContent=G.nodes.length+'/'+MAX_NODES; slotEl.style.color=G.nodes.length>=MAX_NODES?'var(--red)':G.nodes.length>=MAX_NODES*0.75?'var(--amber)':'var(--text2)';}
+  G.nodes.forEach(n=>{
+    const el=document.getElementById('gn'+n.id); if(!el)return;
+    el.classList.toggle('active-chain',!!n._inChain);
+    const textStat=document.getElementById(`ginfo_state_${n.id}`), valStat=document.getElementById(`ginfo_stat_${n.id}`);
+    if(n._hasCongestion){textStat.textContent='JAMMED';textStat.style.color='var(--red)';valStat.textContent='15% RATE';}
+    else if(n._inChain){textStat.textContent='ONLINE';textStat.style.color='var(--green)';valStat.textContent=n._chainVal>0?'+'+fmt(n._chainVal):'';}
+    else{textStat.textContent='IDLE';textStat.style.color='var(--text3)';valStat.textContent='';}
+    updatePortLights(n);
+  });
+  drawWires();
+}
+
+// ─── GAME TICK ───────────────────────────────────────────────────────
+function gameTick(){
+  const now=Date.now(), dt=(now-G.lastTick)/1000; G.lastTick=now;
+  let computedRevSec=0;
+  G.nodes.forEach(n=>{
+    if(!n._inChain){n.progress=0;const bar=document.getElementById(`gf${n.id}`);if(bar)bar.style.width='0%';return;}
+    const ms=NDEFS[n.type].cycleMs/effectiveSpeed(n);
+    n.progress=(n.progress||0)+(dt*1000);
+    if(n.progress>=ms){
+      n.progress=0;
+      (NDEFS[n.type].ports.out||[]).forEach(op=>{
+        G.conns.filter(c=>c.from===n.id&&c.fromPort===op.id).forEach(c=>animatePacket(n.id,op.id,c.to,c.toPort,op.type));
+      });
+      if(n.type==='collector'){G.cash+=n._chainVal;G.totalEarned+=n._chainVal;}
+    }
+    if(n.type==='collector')computedRevSec+=(n._chainVal/(ms/1000));
+    const bar=document.getElementById(`gf${n.id}`);if(bar)bar.style.width=Math.min(100,(n.progress/ms)*100)+'%';
+  });
+  document.getElementById('hc').textContent=fmt(G.cash);
+  document.getElementById('hr').textContent='$'+computedRevSec.toFixed(2)+'/s';
+  document.getElementById('htot').textContent=fmt(G.totalEarned);
+  requestAnimationFrame(gameTick);
+}
+
+// ─── PACKETS ─────────────────────────────────────────────────────────
+function animatePacket(fromNid,fromPort,toNid,toPort,type){
+  const a=portPos(fromNid,fromPort,'out'),b=portPos(toNid,toPort,'in'); if(!a||!b)return;
+  const el=document.createElement('div'); el.className='packet';
+  el.style.backgroundColor=WIRE_COLORS[type]||'#fff';
+  el.style.boxShadow=`0 0 8px ${WIRE_COLORS[type]||'#fff'}`;
+  document.getElementById('node-layer').appendChild(el);
+  let start=null; const duration=450;
+  function step(t){if(!start)start=t;const p=Math.min((t-start)/duration,1);el.style.left=(a.x*(1-p)+b.x*p)+'px';el.style.top=(a.y*(1-p)+b.y*p)+'px';if(p<1)requestAnimationFrame(step);else el.remove();}
+  requestAnimationFrame(step);
+}
+
+// ─── NODE DOM ────────────────────────────────────────────────────────
+function renderNodeDOM(n){
+  const def=NDEFS[n.type];
+  const el=document.createElement('div'); el.className='gnode'; el.id='gn'+n.id;
+  const sp=w2s(n.x,n.y);
+  el.style.left=sp.x+'px'; el.style.top=sp.y+'px';
+  el.style.transform=`scale(${G.view.scale})`; el.style.transformOrigin='top left';
+
+  // Port layout: ports start BELOW the bar+info area
+  // gnbody padding-top=8, bar=3, bar-margin-bottom=6, info-line≈12, gap=8 → ports start at ~37px from gnbody top
+  const PORT_START = 37; // px from top of gnbody where first port sits
+  const PORT_STEP  = 22; // px between ports
+  const outPorts=def.ports.out||[], inPorts=def.ports.in||[];
+  const maxPorts=Math.max(outPorts.length, inPorts.length);
+  // body height = space for bar+info + all ports + bottom padding
+  const bodyH = PORT_START + maxPorts * PORT_STEP + 8;
+
+  el.innerHTML=`
+    <div class="gnhdr" style="background:rgba(0,0,0,0.15);border-left:3px solid ${def.color}">
+      <span class="gnicon">${def.icon}</span>
+      <div class="gntitle">${def.label}</div>
+      <div class="gndel">✕</div>
+    </div>
+    <div class="gnbody" style="height:${bodyH}px;position:relative;padding:8px 10px 8px;">
+      <div class="gnbar"><div class="gnbarfill" id="gf${n.id}" style="background:${def.color}"></div></div>
+      <div class="gninfo"><span id="ginfo_state_${n.id}">IDLE</span><span id="ginfo_stat_${n.id}"></span></div>
+      ${outPorts.map((p,i)=>`<div class="port out" id="p_${n.id}_out_${p.id}" data-port="${p.id}" data-type="${p.type}" style="top:${PORT_START+i*PORT_STEP}px;"><span class="port-label">${p.label}</span></div>`).join('')}
+      ${inPorts.map((p,i)=>`<div class="port in" id="p_${n.id}_in_${p.id}" data-port="${p.id}" data-accepts="${p.accepts}" style="top:${PORT_START+i*PORT_STEP}px;"><span class="port-label">${p.label}</span></div>`).join('')}
+    </div>`;
+
+  el.addEventListener('mousedown',e=>{
+    if(e.target.classList.contains('port')||e.target.closest('.gndel'))return;
+    selectNode(n.id); G.dragging={n,el};
+    // Drag offset accounts for scale
+    const r=el.getBoundingClientRect();
+    G.dragOff.x=e.clientX-r.left; G.dragOff.y=e.clientY-r.top;
+    e.preventDefault();
+  });
+  el.querySelector('.gndel').addEventListener('click',e=>{e.stopPropagation();G.inventory[n.type]++;removeNode(n.id);});
+  el.querySelectorAll('.port.out').forEach(p=>p.addEventListener('mousedown',e=>{
+    e.stopPropagation(); G.wiring={fromId:n.id,fromPort:p.dataset.port,dataType:p.dataset.type}; p.classList.add('lit');
+  }));
+  el.querySelectorAll('.port.in').forEach(p=>p.addEventListener('mouseup',e=>{
+    e.stopPropagation(); if(!G.wiring)return;
+    const portDef=(NDEFS[n.type].ports.in||[]).find(x=>x.id===p.dataset.port);
+    const isMulti=portDef&&portDef.multi;
+    if(G.wiring.dataType===p.dataset.accepts&&G.wiring.fromId!==n.id&&(isMulti||!G.conns.some(c=>c.to===n.id&&c.toPort===p.dataset.port))){
+      G.conns.push({id:G.cid++,from:G.wiring.fromId,fromPort:G.wiring.fromPort,to:n.id,toPort:p.dataset.port,dataType:G.wiring.dataType});
+      traceChain();
+    }
+    G.wiring=null; document.querySelectorAll('.port.lit').forEach(p=>p.classList.remove('lit'));
+  }));
+  document.getElementById('node-layer').appendChild(el);
+}
+
+function updatePortLights(n){
+  const def=NDEFS[n.type];
+  (def.ports.out||[]).forEach(p=>{const el=document.getElementById(`p_${n.id}_out_${p.id}`);if(el)el.classList.toggle('lit',G.conns.some(c=>c.from===n.id&&c.fromPort===p.id));});
+  (def.ports.in||[]).forEach(p=>{const el=document.getElementById(`p_${n.id}_in_${p.id}`);if(el)el.classList.toggle('lit',G.conns.some(c=>c.to===n.id&&c.toPort===p.id));});
+}
+function selectNode(nid){
+  G.selected=nid;
+  G.nodes.forEach(n=>{const el=document.getElementById('gn'+n.id);if(el)el.classList.toggle('selected',n.id===nid);});
+  if(G.activePanel==='upgrades')renderUpgradesTray();
+}
+function removeNode(nid){
+  G.conns=G.conns.filter(c=>c.from!==nid&&c.to!==nid);
+  G.nodes=G.nodes.filter(n=>n.id!==nid);
+  const el=document.getElementById('gn'+nid);if(el)el.remove();
+  if(G.selected===nid)G.selected=null;
+  traceChain();
+}
+function placeFromInventory(type){
+  if(G.inventory[type]<=0)return;
+  if(G.nodes.length>=MAX_NODES){notify('⚠ Node limit reached! Remove a node first.','var(--red)');return;}
+  G.inventory[type]--;
+  const rx=snap(cWrap.clientWidth/2-80+(Math.random()-0.5)*100);
+  const ry=snap(cWrap.clientHeight/2-40+(Math.random()-0.5)*100);
+  const wp=s2w(rx,ry);
+  const nodeObj={id:G.nid++,type,x:snap(wp.x),y:snap(wp.y),progress:0,upgrades:NDEFS[type].upgrades.map(()=>false)};
+  G.nodes.push(nodeObj); renderNodeDOM(nodeObj); traceChain(); selectNode(nodeObj.id);
+  if(G.activePanel==='inventory')renderInventoryTray();
+}
+
+// ─── TRAYS ───────────────────────────────────────────────────────────
+function togglePanel(name){
+  const el=document.getElementById('panel-'+name), btn=document.getElementById('btn-'+name);
+  if(G.activePanel===name){el.style.display='none';btn.classList.remove('active');G.activePanel=null;if(typeof tutShowStep!=='undefined'&&document.getElementById('tut-tooltip').classList.contains('active'))tutShowStep();}
+  else{
+    document.querySelectorAll('.slide-panel').forEach(p=>p.style.display='none');
+    document.querySelectorAll('.panel-btn').forEach(b=>b.classList.remove('active'));
+    el.style.display='block'; btn.classList.add('active'); G.activePanel=name;
+    if(name==='inventory')renderInventoryTray();
+    if(name==='shop')renderShopTray();
+    if(name==='upgrades')renderUpgradesTray();
+  }
+}
+function renderInventoryTray(){
+  const list=document.getElementById('inventory-list'); list.innerHTML='';
+  // Clear old highlights
+  Object.entries(G.inventory).forEach(([type,count])=>{
+    const def=NDEFS[type];
+    const atLimit=G.nodes.length>=MAX_NODES;
+    list.innerHTML+=`<div class="box-item ${count===0||atLimit?'disabled':''}">
+      <div class="biname">${def.icon} ${def.label}</div>
+      <div class="bidesc">${def.desc}</div>
+      <div class="biops"><span class="bicount">Owned: ${count}</span><button class="action-btn" ${count===0||atLimit?'disabled':''} onclick="placeFromInventory('${type}')">${atLimit?'FULL':'Deploy'}</button></div>
+    </div>`;
+  });
+  // Re-apply tutorial highlight after list renders
+  if (typeof tutIdx !== 'undefined' && TUT_STEPS[tutIdx] && TUT_STEPS[tutIdx].highlightType) {
+    const ht = TUT_STEPS[tutIdx].highlightType;
+    document.querySelectorAll('.box-item').forEach(el => {
+      const btn = el.querySelector('.action-btn');
+      if (btn && btn.getAttribute('onclick') && btn.getAttribute('onclick').includes(ht)) {
+        el.style.boxShadow = '0 0 0 3px var(--accent), 0 0 20px rgba(0,212,255,0.4)';
+        el.style.borderColor = 'var(--accent)';
+      }
+    });
+  }
+}
+const SHOP_TABS = {
+  'Infrastructure': {color:'#378add', types:['network','proxy','powerplant','amplifier','repeater']},
+  'Media': {color:'#7f77dd', types:['videodl','audiodl','encoder','streamer','cdnnode']},
+  'Gaming': {color:'#a855f7', types:['pc','gamebroker','gamefarm','tournament']},
+  'Enterprise': {color:'#38bdf8', types:['server','datacenter','cloudnode','ailab']},
+  'Finance': {color:'#00e676', types:['seller','adplatform','exchange','collector']},
+};
+let shopTab = Object.keys(SHOP_TABS)[0];
+
+function renderShopTabs(){
+  const bar = document.getElementById('shop-tabs'); bar.innerHTML='';
+  Object.entries(SHOP_TABS).forEach(([name,{color}])=>{
+    const b=document.createElement('button'); b.className='shop-tab'+(shopTab===name?' on':'');
+    b.style.setProperty('--tc',color);
+    if(shopTab===name) b.style.borderBottomColor=color, b.style.color=color;
+    b.textContent=name; b.onclick=()=>{shopTab=name;renderShopTray();};
+    bar.appendChild(b);
+  });
+}
+
+function renderShopTray(){
+  renderShopTabs();
+  const list=document.getElementById('shop-list'); list.innerHTML='';
+  const types = SHOP_TABS[shopTab]?.types || [];
+  types.forEach(type=>{
+    const def=NDEFS[type]; if(!def)return;
+    const inv=G.inventory[type]||0;
+    const canBuy=G.cash>=def.cost;
+    // Build recipe hint
+    const ins=(def.ports.in||[]).map(p=>`<span class="rbadge" style="background:${WIRE_COLORS[p.accepts]||'#333'}22;color:${WIRE_COLORS[p.accepts]||'#888'}">${p.label} in</span>`).join('');
+    const outs=(def.ports.out||[]).map(p=>`<span class="rbadge" style="background:${WIRE_COLORS[p.type]||'#333'}22;color:${WIRE_COLORS[p.type]||'#888'}">${p.label} out</span>`).join('');
+    list.innerHTML+=`<div class="box-item" style="border-top:2px solid ${def.color}22;min-height:190px;">
+      <div>
+        <div class="biname">${def.icon} ${def.label} <span style="font-size:10px;color:var(--text3);font-weight:400;margin-left:4px;">×${inv} owned</span></div>
+        <div class="bidesc">${def.desc}</div>
+        <div class="recipe-row">${ins}${ins&&outs?'<span style="color:var(--text3);font-size:11px;align-self:center">→</span>':''}${outs}</div>
+      </div>
+      <div class="biops"><span class="bicost">${fmt(def.cost)}</span><button class="action-btn" ${!canBuy?'disabled':''} onclick="buyItem('${type}')" style="border-color:${canBuy?def.color:''};">Buy</button></div>
+    </div>`;
+  });
+  if(!types.length||types.filter(t=>NDEFS[t]).length===0)
+    list.innerHTML='<div style="padding:20px;color:var(--text3);">Nothing here yet.</div>';
+}
+function buyItem(type){
+  if(G.cash>=NDEFS[type].cost){G.cash-=NDEFS[type].cost;G.inventory[type]++;renderShopTray();notify('Purchased '+NDEFS[type].label);}
+}
+function renderUpgradesTray(){
+  const list=document.getElementById('upgrades-list'); list.innerHTML='';
+  if(!G.selected){list.innerHTML='<div style="padding:14px;color:var(--text3);font-size:13px;">Click a node on the canvas first, then upgrade it here.</div>';return;}
+  const n=G.nodes.find(x=>x.id===G.selected); if(!n)return;
+  const def=NDEFS[n.type];
+  // Group upgrades into tracks by base name pattern (e.g. "Bandwidth I-V" = one track)
+  // We detect tracks by effect groups
+  const tracks={};
+  def.upgrades.forEach((up,idx)=>{
+    const key=up.effect+(up.effect==='multx'?'3':up.effect==='multx5'?'5':'');
+    if(!tracks[key])tracks[key]=[];
+    tracks[key].push({up,idx});
+  });
+  Object.values(tracks).forEach(track=>{
+    const maxLevel=track.length;
+    // Find highest purchased level
+    let currentLevel=0;
+    track.forEach(({idx})=>{if(n.upgrades[idx])currentLevel++;});
+    const nextIdx=currentLevel<maxLevel?track[currentLevel].idx:-1;
+    const nextUp=nextIdx>=0?def.upgrades[nextIdx]:null;
+    const allDone=currentLevel>=maxLevel;
+    // Pip row
+    const pips=track.map(({idx})=>
+      `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:3px;background:${n.upgrades[idx]?'var(--green)':'var(--border2)'}"></span>`
+    ).join('');
+    list.innerHTML+=`<div class="box-item ${allDone?'':''}" style="min-height:160px;">
+      <div class="biname">${track[0].up.name.replace(/ [IVX]+$/,'')} <span style="font-size:11px;color:var(--text3);font-weight:400;">${currentLevel}/${maxLevel}</span></div>
+      <div style="margin:4px 0 6px">${pips}</div>
+      <div class="bidesc">${nextUp?nextUp.desc:(track[maxLevel-1].up.desc+' — MAXED')}</div>
+      <div class="biops">
+        <span class="bicost">${allDone?'✓ MAX':fmt(nextUp.cost)}</span>
+        <button class="action-btn" ${allDone||G.cash<(nextUp?.cost||0)?'disabled':''} onclick="applyUpgrade(${n.id},${nextIdx})">${allDone?'MAXED':'Upgrade'}</button>
+      </div>
+    </div>`;
+  });
+}
+function applyUpgrade(nid,idx){
+  const n=G.nodes.find(x=>x.id===nid); const up=NDEFS[n.type].upgrades[idx];
+  if(G.cash>=up.cost&&!n.upgrades[idx]){G.cash-=up.cost;n.upgrades[idx]=true;traceChain();renderUpgradesTray();notify('Upgrade applied: '+up.name,'var(--green)');}
+}
+
+// ─── PRESTIGE ────────────────────────────────────────────────────────
+function prestigeMultiplier(){
+  // Soft formula: every $10K earned = +5% multiplier, diminishing
+  const earned=G.totalEarned;
+  return parseFloat((1+Math.pow(earned/10000,0.6)*0.1).toFixed(2));
+}
+function openPrestige(){
+  const mult=prestigeMultiplier();
+  const newMult=parseFloat((G.prestigeMult*mult).toFixed(2));
+  document.getElementById('prestige-preview').textContent='New multiplier: ×'+newMult+' (was ×'+G.prestigeMult+')';
+  document.getElementById('prestige-modal').classList.add('open');
+}
+function closePrestige(){document.getElementById('prestige-modal').classList.remove('open');}
+function doPrestige(){
+  const mult=prestigeMultiplier();
+  G.prestigeMult=parseFloat((G.prestigeMult*mult).toFixed(2));
+  // Remove all nodes
+  [...G.nodes].forEach(n=>removeNode(n.id));
+  G.nodes=[]; G.conns=[]; G.cash=0; G.totalEarned=0; G.nid=0; G.cid=0;
+  G.inventory={network:1,videodl:1,audiodl:0,encoder:0,proxy:0,seller:1,collector:1};
+  document.getElementById('hpr').textContent='×'+G.prestigeMult;
+  closePrestige();
+  notify('★ Prestige! Multiplier now ×'+G.prestigeMult,'var(--purple)');
+  if(G.activePanel==='inventory')renderInventoryTray();
+}
+
+// ─── TUTORIAL ────────────────────────────────────────────────────────
+const TUT_STEPS = [
+  {
+    id: 'welcome',
+    title: 'Welcome to NodeGrid!',
+    body: `You build <strong>chains</strong> of connected nodes that generate money automatically. This tutorial will walk you through making your first chain step by step.<br><br>Let's start by placing your nodes on the canvas.`,
+    target: null,
+    action: 'Start →',
+    wait: false
+  },
+  {
+    id: 'deploy_network',
+    title: 'Step 1 — Deploy a Network',
+    body: `The <span class="hl">🌐 Network</span> node is your source. It generates DL and UL signals.<br><br>Open <strong>📦 Inventory</strong> below, then click <strong>Deploy</strong> next to <em>Network</em>.`,
+    target: 'btn-inventory',
+    action: "I deployed it ✓",
+    wait: true,
+    highlightType: 'network',
+    check: () => G.nodes.some(n => n.type === 'network')
+  },
+  {
+    id: 'deploy_videodl',
+    title: 'Step 2 — Deploy a Video DL',
+    body: `The <span class="hlg">🎞 Video DL</span> node receives a DL signal and produces a <strong>File</strong> stream.<br><br>Deploy the <em>Video DL</em> from Inventory.`,
+    target: 'btn-inventory',
+    action: "I deployed it ✓",
+    wait: true,
+    highlightType: 'videodl',
+    check: () => G.nodes.some(n => n.type === 'videodl')
+  },
+  {
+    id: 'deploy_seller',
+    title: 'Step 3 — Deploy a Seller',
+    body: `The <span class="hla">💰 Seller</span> takes File data + an UL feed and converts them into <strong>money</strong>.<br><br>Deploy the <em>Seller</em> from Inventory.`,
+    target: 'btn-inventory',
+    action: "I deployed it ✓",
+    wait: true,
+    highlightType: 'seller',
+    check: () => G.nodes.some(n => n.type === 'seller')
+  },
+  {
+    id: 'deploy_collector',
+    title: 'Step 4 — Deploy a Collector',
+    body: `The <span class="hlg">🏦 Collector</span> is your bank — it receives money from the Seller and adds it to your balance.<br><br>Deploy the <em>Collector</em> from Inventory.`,
+    target: 'btn-inventory',
+    action: "I deployed it ✓",
+    wait: true,
+    highlightType: 'collector',
+    check: () => G.nodes.some(n => n.type === 'collector')
+  },
+  {
+    id: 'spread',
+    title: 'Step 5 — Spread Your Nodes Out',
+    body: `<strong>Drag</strong> each node to spread them apart — left to right like this:<br><br><code>Network → Video DL → Seller → Collector</code><br><br>⚠️ If nodes are too close, they get <strong style="color:var(--red)">JAMMED</strong> and earn almost nothing.`,
+    target: null,
+    action: 'Got it →',
+    wait: false
+  },
+  {
+    id: 'wire1',
+    title: 'Step 6 — Wire: Network DL → Video DL',
+    body: `Now let's connect them. Ports are the <strong>small dots</strong> on node edges.<br><br>Drag from the <span class="hl">● DL</span> output on <strong>Network</strong> (right side) → to the <span class="hl">● DL</span> input on <strong>Video DL</strong> (left side).`,
+    target: null,
+    action: "Done ✓",
+    wait: true,
+    check: () => {
+      const net = G.nodes.find(n=>n.type==='network');
+      const vdl = G.nodes.find(n=>n.type==='videodl');
+      return net && vdl && G.conns.some(c=>c.from===net.id && c.fromPort==='dl' && c.to===vdl.id && c.toPort==='dl');
+    }
+  },
+  {
+    id: 'wire2',
+    title: 'Step 7 — Wire: Video DL File → Seller',
+    body: `Now connect the <span class="hlg">● File</span> output on <strong>Video DL</strong> (right side) → to the <span class="hlg">● File</span> input on <strong>Seller</strong> (left side).`,
+    target: null,
+    action: "Done ✓",
+    wait: true,
+    check: () => {
+      const vdl = G.nodes.find(n=>n.type==='videodl');
+      const sel = G.nodes.find(n=>n.type==='seller');
+      return vdl && sel && G.conns.some(c=>c.from===vdl.id && c.fromPort==='file' && c.to===sel.id && c.toPort==='file');
+    }
+  },
+  {
+    id: 'wire3',
+    title: 'Step 8 — Wire: Network UL → Seller',
+    body: `Connect the <span class="hla">● UL</span> output on <strong>Network</strong> (right side, second dot) → to the <span class="hla">● UL</span> input on <strong>Seller</strong> (left side, bottom dot).`,
+    target: null,
+    action: "Done ✓",
+    wait: true,
+    check: () => {
+      const net = G.nodes.find(n=>n.type==='network');
+      const sel = G.nodes.find(n=>n.type==='seller');
+      return net && sel && G.conns.some(c=>c.from===net.id && c.fromPort==='ul' && c.to===sel.id && c.toPort==='ul');
+    }
+  },
+  {
+    id: 'wire4',
+    title: 'Step 9 — Wire: Seller $ → Collector',
+    body: `Last wire! Connect the <span class="hla">● $</span> output on <strong>Seller</strong> → to the <span class="hla">● $</span> input on <strong>Collector</strong>.`,
+    target: null,
+    action: "Done ✓",
+    wait: true,
+    check: () => {
+      const sel = G.nodes.find(n=>n.type==='seller');
+      const col = G.nodes.find(n=>n.type==='collector');
+      return sel && col && G.conns.some(c=>c.from===sel.id && c.fromPort==='money' && c.to===col.id && c.toPort==='money');
+    }
+  },
+  {
+    id: 'done',
+    title: '🎉 Chain Complete!',
+    body: `Your nodes should all turn <span class="hlg">green</span> and show <strong>ONLINE</strong>. Watch the balance tick up in the top bar!<br><br>From here: buy more nodes in the <strong>🛒 Shop</strong>, upgrade them with <strong>⚡ Upgrades</strong>, and eventually <strong>★ Prestige</strong> for permanent multipliers.<br><br>Good luck!`,
+    target: null,
+    action: '✓ Start Playing',
+    green: true,
+    wait: false
+  }
+];
+
+let tutIdx = 0;
+let tutActive = false;
+
+function tutGetTargetRect(id) {
+  if (!id) return null;
+  const el = document.getElementById(id);
+  if (!el) return null;
+  return el.getBoundingClientRect();
+}
+
+// Step phase colours for the accent bar + action button
+const TUT_PHASE_COLORS = [
+  '#00d4ff','#00d4ff',                    // welcome
+  '#00e676','#00e676','#00e676','#00e676', // deploy steps
+  '#ffab00',                              // spread
+  '#7f77dd','#7f77dd','#7f77dd','#7f77dd', // wiring
+  '#00e676'                               // done
+];
+const TUT_STEP_ICONS = [
+  '👋','📦','📦','📦','📦',
+  '↔️','🔌','🔌','🔌','🔌',
+  '✅'
+];
+
+function tutShowStep() {
+  const step = TUT_STEPS[tutIdx];
+  const tooltip = document.getElementById('tut-tooltip');
+  const hole = document.getElementById('tut-hole');
+  const total = TUT_STEPS.length;
+  const color = TUT_PHASE_COLORS[Math.min(tutIdx, TUT_PHASE_COLORS.length-1)] || 'var(--accent)';
+
+  // Accent bar + progress fill
+  document.getElementById('tut-accent-bar').style.background = color;
+  const fillPct = Math.round(((tutIdx) / (total - 1)) * 100);
+  const fill = document.getElementById('tut-progbar-fill');
+  fill.style.width = fillPct + '%';
+  fill.style.background = color;
+
+  // Icon, step counter, title, body
+  document.getElementById('tut-icon').textContent = TUT_STEP_ICONS[Math.min(tutIdx, TUT_STEP_ICONS.length-1)] || '📋';
+  document.getElementById('tut-tt-step').textContent = `STEP ${tutIdx + 1} / ${total}`;
+  document.getElementById('tut-tt-title').textContent = step.title;
+  document.getElementById('tut-tt-body').innerHTML = step.body;
+
+  // Action button — styled with phase colour
+  const btn = document.getElementById('tut-action');
+  btn.textContent = step.action;
+  btn.style.background = color;
+  btn.style.color = '#07080b';
+
+  // Spotlight
+  const rect = tutGetTargetRect(step.target);
+  if (rect) {
+    const pad = 8;
+    hole.style.display = 'block';
+    hole.style.left   = (rect.left - pad) + 'px';
+    hole.style.top    = (rect.top  - pad) + 'px';
+    hole.style.width  = (rect.width  + pad * 2) + 'px';
+    hole.style.height = (rect.height + pad * 2) + 'px';
+    hole.classList.add('pulse');
+  } else {
+    hole.style.display = 'none';
+    hole.classList.remove('pulse');
+  }
+
+  // Tooltip always bottom-left — CSS handles it (left:16px, bottom:80px)
+  // But if a panel is open (inventory covers bottom), move it up
+  const panelOpen = G.activePanel !== null;
+  const panelH = 220;
+  tooltip.style.bottom = panelOpen ? (panelH + 80) + 'px' : '80px';
+  tooltip.classList.add('active');
+
+  // Highlight relevant inventory card
+  document.querySelectorAll('.box-item').forEach(el => {
+    el.style.boxShadow = '';
+    el.style.borderColor = '';
+  });
+  if (step.highlightType) {
+    setTimeout(() => {
+      document.querySelectorAll('.box-item').forEach(el => {
+        const b = el.querySelector('.action-btn');
+        if (b && b.getAttribute('onclick') && b.getAttribute('onclick').includes(step.highlightType)) {
+          el.style.boxShadow = `0 0 0 3px ${color}, 0 0 20px ${color}44`;
+          el.style.borderColor = color;
+        }
+      });
+    }, 120);
+  }
+}
+
+function tutAction() {
+  const step = TUT_STEPS[tutIdx];
+  if (step.wait && step.check) {
+    if (!step.check()) {
+      // Flash the tooltip to indicate not done yet
+      const tip = document.getElementById('tut-tooltip');
+      const origBg=document.getElementById('tut-accent-bar').style.background;
+      document.getElementById('tut-accent-bar').style.background='var(--red)';
+      document.getElementById('tut-action').style.background='var(--red)';
+      setTimeout(()=>{document.getElementById('tut-accent-bar').style.background=origBg;document.getElementById('tut-action').style.background=origBg;},700);
+      const body = document.getElementById('tut-tt-body');
+      const orig = body.innerHTML;
+      body.innerHTML = '<span style="color:var(--red)">⚠ Not done yet — complete the action above first!</span><br><br>' + orig;
+      setTimeout(() => body.innerHTML = orig, 1800);
+      return;
+    }
+  }
+  tutIdx++;
+  if (tutIdx >= TUT_STEPS.length) {
+    closeTutorial();
+  } else {
+    tutShowStep();
+    // Auto-close inventory panel for wiring steps
+    const step = TUT_STEPS[tutIdx];
+    if (step.id.startsWith('wire') || step.id === 'spread' || step.id === 'done') {
+      if (G.activePanel) togglePanel(G.activePanel);
+    }
+    if (step.id.startsWith('deploy') || step.target === 'btn-inventory') {
+      if (G.activePanel !== 'inventory') togglePanel('inventory');
+    }
+  }
+}
+
+function openTutorial() {
+  tutActive = true;
+  tutIdx = 0;
+  tutShowStep();
+}
+
+function closeTutorial() {
+  tutActive = false;
+  document.getElementById('tut-tooltip').classList.remove('active');
+  document.getElementById('tut-hole').style.display = 'none';
+  document.getElementById('tut-backdrop').classList.remove('active');
+  localStorage.setItem('ng_tutorial_done', '1');
+}
+
+
+// ─── ACHIEVEMENTS ────────────────────────────────────────────────────
+const ACHIEVEMENTS = [
+  {id:'first_chain',   title:'First Chain!',   desc:'Get your first chain online',   check:()=>G.nodes.some(n=>n._inChain)},
+  {id:'cash_1k',       title:'$1,000 Earned',  desc:'Earn $1,000 total',              check:()=>G.totalEarned>=1000},
+  {id:'cash_10k',      title:'$10K Club',      desc:'Earn $10,000 total',             check:()=>G.totalEarned>=10000},
+  {id:'cash_1m',       title:'Millionaire!',   desc:'Earn $1,000,000 total',          check:()=>G.totalEarned>=1000000},
+  {id:'cash_1b',       title:'Billionaire!',   desc:'Earn $1,000,000,000 total',      check:()=>G.totalEarned>=1e9},
+  {id:'three_chains',  title:'Triple Threat',  desc:'Run 3 chains at once',           check:()=>parseInt(document.getElementById('hch')?.textContent||0)>=3},
+  {id:'five_chains',   title:'Chain Master',   desc:'Run 5 chains at once',           check:()=>parseInt(document.getElementById('hch')?.textContent||0)>=5},
+  {id:'full_board',    title:'Full House',     desc:'Have 16 nodes deployed',         check:()=>G.nodes.length>=16},
+  {id:'first_prestige','title':'Reborn',       desc:'Complete your first prestige',   check:()=>G.prestigeMult>1},
+  {id:'gaming_chain',  title:'Gamer',          desc:'Get a Gaming PC chain online',   check:()=>G.nodes.some(n=>n.type==='pc'&&n._inChain)},
+  {id:'ai_chain',      title:'AI Overlord',    desc:'Get an AI Lab chain online',     check:()=>G.nodes.some(n=>n.type==='ailab'&&n._inChain)},
+  {id:'tournament',    title:'Esports Baron',  desc:'Get a Tournament chain online',  check:()=>G.nodes.some(n=>n.type==='tournament'&&n._inChain)},
+];
+const G_ACH_DONE = new Set(JSON.parse(localStorage.getItem('ng_ach')||'[]'));
+
+function checkAchievements(){
+  ACHIEVEMENTS.forEach(a=>{
+    if(G_ACH_DONE.has(a.id))return;
+    if(a.check()){
+      G_ACH_DONE.add(a.id);
+      localStorage.setItem('ng_ach',JSON.stringify([...G_ACH_DONE]));
+      showAchievement(a);
+    }
+  });
+}
+function showAchievement(a){
+  const c=document.getElementById('ach-notif');
+  const d=document.createElement('div'); d.className='ach-card';
+  d.innerHTML=`<div class="ach-top">🏆 ACHIEVEMENT UNLOCKED</div><div class="ach-name">${a.title}</div><div style="font-size:11px;color:var(--text2);margin-top:2px;">${a.desc}</div>`;
+  c.appendChild(d); setTimeout(()=>d.remove(),4200);
+  notify('🏆 '+a.title,'var(--amber)');
+}
+
+
+// ─── LEADERBOARD ─────────────────────────────────────────────────────
+const BAD=['nigger','nigga','faggot','retard','cunt','chink','spic','kike','wetback','tranny','whore','slut','asshole','motherfucker','fuck','shit','cock','dick','pussy','twat','hitler','nazi','kkk','rape','pedo'];
+function cleanName(r){const s=(r||'').trim().replace(/[^a-zA-Z0-9_ .!-]/g,'').trim().slice(0,20);if(!s)return null;const lo=s.toLowerCase();for(const w of BAD)if(lo.includes(w))return null;return s;}
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+let lbRows=[];
+function myPid(){return localStorage.getItem('ng_pid')||'';}
+function waitFb(cb,t=0){if(window.fbReady){cb();return;}if(t>60)return;setTimeout(()=>waitFb(cb,t+1),150);}
+
+function openLB(){
+  if(G.activePanel)togglePanel(G.activePanel);
+  document.getElementById('lb-screen').classList.add('open');
+  document.getElementById('lb-my-score').textContent=fmt(G.totalEarned);
+  document.getElementById('lb-status').textContent='';
+  lbRenderNameArea();
+  lbRenderAll();
+  waitFb(()=>window.fbListen(rows=>{lbRows=rows;const s=document.getElementById('lb-subtitle');if(s)s.textContent=rows.length+' players';lbRenderAll();}));
+}
+function closeLB(){document.getElementById('lb-screen').classList.remove('open');}
+
+function lbRenderNameArea(){
+  const area=document.getElementById('lb-name-area');if(!area)return;
+  const saved=localStorage.getItem('ng_player_name');
+  if(saved){
+    area.innerHTML=`<span style="font-size:12px;color:var(--text3);font-family:var(--font-mono);">PLAYING AS</span><span style="font-size:15px;font-weight:700;color:var(--text);">👤 ${esc(saved)}</span><button onclick="lbSubmit()" style="padding:9px 20px;background:#1a1400;border:1px solid var(--amber);border-radius:5px;color:var(--amber);font-size:13px;font-weight:700;cursor:pointer;">Submit Score</button>`;
+  }else{
+    area.innerHTML=`<span style="font-size:12px;color:var(--text3);font-family:var(--font-mono);">YOUR NAME</span><input id="lb-name-input" maxlength="20" placeholder="Enter name…" spellcheck="false" style="background:var(--bg3);border:1px solid var(--border2);border-radius:5px;padding:9px 12px;color:var(--text);font-size:14px;outline:none;width:150px;" onkeydown="if(event.key==='Enter')lbSubmit()"/><button onclick="lbSubmit()" style="padding:9px 20px;background:#1a1400;border:1px solid var(--amber);border-radius:5px;color:var(--amber);font-size:13px;font-weight:700;cursor:pointer;">Submit</button>`;
+  }
+}
+
+async function lbSubmit(){
+  const st=document.getElementById('lb-status');
+  let name=localStorage.getItem('ng_player_name');
+  if(!name){
+    const inp=document.getElementById('lb-name-input');
+    name=cleanName(inp?inp.value:'');
+    if(!name){st.textContent='⚠ Invalid name.';st.style.color='var(--red)';return;}
+    localStorage.setItem('ng_player_name',name);
+  }
+  const score=Math.round(G.totalEarned);
+  if(score<=0){st.textContent='⚠ Earn money first!';st.style.color='var(--red)';return;}
+  st.textContent='Saving…';st.style.color='var(--text3)';
+  await new Promise(r=>waitFb(r));
+  const res=await window.fbWrite(name,score);
+  const ok=res&&res.ok;
+  if(ok){st.textContent='✓ Saved as "'+name+'" — '+fmt(score)+'!';st.style.color='var(--green)';}
+  else{const msg=(res&&res.err)||'unknown error';st.textContent='⚠ '+msg;st.style.color='var(--red)';console.error('Submit failed:',msg);}
+  lbRenderNameArea();
+}
+
+function lbRenderAll(){
+  const pod=document.getElementById('lb-podium'),list=document.getElementById('lb-list'),lbl=document.getElementById('lb-all-label'),me=myPid();
+  if(!pod)return;
+  if(!lbRows.length){pod.innerHTML='<div class="lb-empty">No scores yet!</div>';list.innerHTML='';if(lbl)lbl.style.display='none';return;}
+  const CR=['👑','🥈','🥉'],PC=['pod-2','pod-1','pod-3'],t=lbRows.slice(0,3);
+  const sl=t.length===1?[null,t[0],null]:t.length===2?[t[1],t[0],null]:[t[1],t[0],t[2]];
+  pod.innerHTML=sl.map((e,si)=>{
+    if(!e)return'<div style="width:110px;visibility:hidden;"></div>';
+    const rank=lbRows.indexOf(e)+1,isMe=me&&(e.fbKey===me||e.pid===me);
+    return`<div class="pod ${PC[si]}${isMe?' pod-me':''}"><div class="pod-crown">${CR[rank-1]}</div><div class="pod-avatar">${(e.name||'?')[0].toUpperCase()}</div><div class="pod-name">${esc(e.name)}${isMe?' 👈':''}</div><div class="pod-score">${fmt(e.score)}</div><div class="pod-block">#${rank}</div></div>`;
+  }).join('');
+  if(lbl)lbl.style.display='block';
+  list.innerHTML=lbRows.map((e,i)=>{
+    const rank=i+1,isMe=me&&(e.fbKey===me||e.pid===me),dim=rank<=3?'opacity:0.4;':'';
+    const med=rank===1?'👑':rank===2?'🥈':rank===3?'🥉':'';
+    const rc=rank===1?'#ffd700':rank===2?'#c0c0c0':rank===3?'#cd7f32':'var(--text3)';
+    return`<div class="lb-row${isMe?' me':''}" style="${dim}"><span class="lb-rank" style="color:${rc};">#${rank}</span><span class="lb-name">${med?`<span style="margin-right:4px;">${med}</span>`:''}${esc(e.name)}${isMe?' 👈':''}</span><span class="lb-score">${fmt(e.score)}</span></div>`;
+  }).join('');
+}
+
+function lbAutoSync(){
+  const name=localStorage.getItem('ng_player_name'),score=Math.round(G.totalEarned);
+  if(!name||score<=0)return;
+  waitFb(async()=>{const ex=lbRows.find(r=>r.pid===myPid());if(!ex||score>ex.score){const r=await window.fbWrite(name,score);if(r&&r.ok)console.log('AutoSync OK',score);}});
+}
+
+
+// ─── SAVE & LOAD ─────────────────────────────────────────────────────
+const SAVE_KEY='ng_save_v1';
+function saveGame(){
+  try{
+    localStorage.setItem(SAVE_KEY,JSON.stringify({
+      cash:G.cash,totalEarned:G.totalEarned,prestigeMult:G.prestigeMult,
+      inventory:G.inventory,nid:G.nid,cid:G.cid,view:G.view,
+      nodes:G.nodes.map(n=>({id:n.id,type:n.type,x:n.x,y:n.y,upgrades:n.upgrades,progress:n.progress||0})),
+      conns:G.conns.map(c=>({id:c.id,from:c.from,fromPort:c.fromPort,to:c.to,toPort:c.toPort,dataType:c.dataType}))
+    }));
+  }catch(e){console.warn('Save failed',e);}
+}
+function loadGame(){
+  try{
+    const raw=localStorage.getItem(SAVE_KEY);if(!raw)return false;
+    const d=JSON.parse(raw);
+    G.cash=d.cash||0;G.totalEarned=d.totalEarned||0;G.prestigeMult=d.prestigeMult||1;
+    G.inventory=Object.assign({...G.inventory},d.inventory||{});
+    G.nid=d.nid||0;G.cid=d.cid||0;
+    if(d.view)G.view=d.view;
+    (d.nodes||[]).forEach(nd=>{
+      if(!NDEFS[nd.type])return;
+      const def=NDEFS[nd.type];
+      const n={id:nd.id,type:nd.type,x:nd.x,y:nd.y,progress:nd.progress||0,
+        upgrades:Array.isArray(nd.upgrades)?nd.upgrades.concat(Array(def.upgrades.length).fill(false)).slice(0,def.upgrades.length):def.upgrades.map(()=>false)};
+      G.nodes.push(n);renderNodeDOM(n);
+    });
+    (d.conns||[]).forEach(co=>G.conns.push({id:co.id,from:co.from,fromPort:co.fromPort,to:co.to,toPort:co.toPort,dataType:co.dataType}));
+    document.getElementById('hc').textContent=fmt(G.cash);
+    document.getElementById('htot').textContent=fmt(G.totalEarned);
+    document.getElementById('hpr').textContent='×'+G.prestigeMult;
+    repositionNodes();traceChain();return true;
+  }catch(e){console.warn('Load failed',e);return false;}
+}
+window.addEventListener('beforeunload',saveGame);
+setInterval(saveGame,15000);
+
+// ─── INIT ─────────────────────────────────────────────────────────────
+function initGame() {
+  drawGrid();
+  const hasSave=loadGame();
+  if(hasSave) notify('✓ Game loaded','var(--green)');
+  togglePanel('inventory');
+  requestAnimationFrame(gameTick);
+  if (!localStorage.getItem('ng_tutorial_done')) {
+    setTimeout(openTutorial, 500);
+  }
+  setTimeout(lbAutoSync, 4000);
+  setInterval(lbAutoSync, 5*60*1000);
+}
+initGame();
+</script>
+</body>
+</html>
